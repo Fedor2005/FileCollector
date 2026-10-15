@@ -1,0 +1,83 @@
+#include "../include/Exception.hpp"
+#include "../include/NonOverlappingIntervals.hpp"
+
+#include <format>
+
+using namespace fc;
+
+template <Comparable T>
+std::vector<Interval<T>> NonOverlappingIntervals<T>::uncovered_intervals(
+    const Interval<T> &interval) const {
+  auto start = interval->first;
+  auto end = interval->end;
+  std::vector<Interval<T>> result;
+  if (!(start < end))
+    return result;
+
+  auto it = old_intervals.lower_bound(start);
+  if (it != old_intervals.begin()) {
+    auto prev = std::prev(it);
+    if (start < prev->second)
+      it = prev;
+  }
+
+  T cur = start;
+  for (; it != old_intervals.end() && it->first < end; ++it) {
+    const T &s = it->first;
+    const T &e = it->second;
+    if (cur < s)
+      result.emplace_back(cur, s);
+    if (cur < e)
+      cur = e;
+    if (!(cur < end))
+      break;
+  }
+
+  if (cur < end)
+    result.emplace_back(cur, end);
+  return result;
+}
+
+template <Comparable T>
+void NonOverlappingIntervals::add_interval(const Interval &interval) {
+
+  auto start = interval->first;
+  auto end = interval->second;
+  if (!(start < end)) {
+    throw Exception(
+        ErrorCode::IncorrectIntervalBoundaries,
+        std::format("interval invalid with boundaries {}; {}", start, end));
+  }
+
+  T new_start = start;
+  T new_end = end;
+
+  auto it = old_intervals.lower_bound(start);
+
+  if (it != old_intervals.begin()) {
+    auto prev = std::prev(it);
+    if (!(prev->second < start)) {
+      if (!(prev->second < end))
+        return; // already fully covered, nothing to do
+      it = prev;
+    }
+  }
+
+  while (it != old_intervals.end() && !(new_end < it->first)) {
+    if (it->first < new_start)
+      new_start = it->first;
+    if (new_end < it->second)
+      new_end = it->second;
+    it = old_intervals.erase(it);
+  }
+
+  old_intervals.emplace_hint(it, new_start, new_end);
+}
+
+#ifdef UNIT_TEST
+// Test-only access to the internal storage.
+template <Comparable T>
+const std::map<T, T> &NonOverlappingIntervals<T>::get_container() {
+  return container_;
+}
+#endif
