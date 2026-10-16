@@ -1,18 +1,14 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <map>
 #include <vector>
 
 namespace fc {
 
 template <typename T>
-concept Comparable = requires(const T &a, const T &b) {
-  { a < b } -> std::convertible_to<bool>;
-  { a > b } -> std::convertible_to<bool>;
-  { a <= b } -> std::convertible_to<bool>;
-  { a >= b } -> std::convertible_to<bool>;
-};
+concept Comparable = std::totally_ordered<T>;
 
 template <Comparable T> using Interval = std::pair<T, T>;
 
@@ -25,10 +21,8 @@ public:
   std::vector<Interval<T>>
   uncovered_intervals(const Interval<T> &interval) const;
   void add_interval(const Interval<T> &interval);
-#ifdef UNIT_TEST
-  // Test-only access to the internal storage.
-  std::map<T, T> get_container();
-#endif
+  size_t size();
+  const std::map<T, T> &get_container() const; // use in building file
   ~NonOverlappingIntervals();
 };
 

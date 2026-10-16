@@ -5,7 +5,7 @@
 
 namespace fc {
 
-enum class ErrorCode { OK = 0, FileIdAlreadyUse };
+enum class ErrorCode { OK = 0, FileNotExist, FileNotFilled, FileIdAlreadyUse };
 class Exception : public std::runtime_error {
   ErrorCode code_;
 

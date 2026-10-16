@@ -1,14 +1,17 @@
 #pragma once
 
+#include "NonOverlappingIntervals.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
 
 namespace fc {
+using File = std::shared_ptr<std::vector<uint8_t>>;
+using CollectingFile = std::pair<std::shared_ptr<const std::vector<uint8_t>>,
+                                 const NonOverlappingIntervals<size_t> &>;
 
 class FileCollector {
 public:
@@ -16,14 +19,23 @@ public:
   void OnNewChunk(uint32_t fileId, size_t pos, std::vector<uint8_t> &&chunk);
   // pos - позиция в файле
 
-  // Метод получения собранного файла.
-  // Требуется предложить и реализовать оптимальный интерфейс.
-  // std::vector<uint8_t> GetFile(uint32_t fileId); // Как передавать данные?
+  // Возвращает файл. Если файл не заполенен, ошибка.
+  File GetFile(uint32_t FileId);
+
+  // немедленный возврат ссылки на констатные файл + интервалы, на которых он
+  // заполнен
+  CollectingFile GetCollectingFile(uint32_t fileId);
+
+  //
+
+  bool is_filled(uint32_t fileId);
+
 private:
   class FileState {
   public:
-    std::vector<uint8_t> buffer_;        // size of fileSize
-    std::map<size_t, size_t> intervals_; // non‑overlapping merged
+    File file_; // File
+    // struct what can store vector and Mapped File
+    NonOverlappingIntervals<size_t> intervals_; // non‑overlapping merged
     mutable std::mutex mtx_;
 
     FileState(size_t fileSize);
