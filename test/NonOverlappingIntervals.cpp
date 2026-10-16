@@ -12,6 +12,10 @@ namespace {
 
 using IntMap = std::map<int, int>;
 using Pairs = std::vector<std::pair<int, int>>;
+using fc::Interval;
+using fc::NonOverlappingIntervals;
+
+
 
 // The only place that knows how Interval<T> is laid out.
 // If your Interval has named fields (e.g. .start/.end), change it here.
@@ -45,12 +49,12 @@ template <typename T>
 class NonOverlappingIntervalsTest : public ::testing::Test {
 protected:
   void Add(int s, int e) {
-    iv.add_interval(s, e);
+    iv.add_interval({s, e});
     ASSERT_TRUE(IsCanonical(iv.get_container()));
   }
   const IntMap &C() const { return iv.get_container(); }
   Pairs Uncovered(int s, int e) const {
-    return ToPairs(iv.uncovered_intervals(s, e));
+    return ToPairs(iv.uncovered_intervals({s, e}));
   }
 
   NonOverlappingIntervals<int> iv;
@@ -66,8 +70,8 @@ TEST_F(NonOverlappingIntervalsTest, AddToEmpty) {
 }
 
 TEST_F(NonOverlappingIntervalsTest, EmptyAndInvertedIntervalsAreIgnored) {
-  Add(5, 5);
-  Add(7, 3);
+  EXPECT_THROW(iv.add_interval({5, 5}), fc::Exception);
+  EXPECT_THROW(iv.add_interval({7, 3}), fc::Exception);
   EXPECT_TRUE(C().empty());
 }
 
@@ -148,12 +152,12 @@ TEST_F(NonOverlappingIntervalsTest, MergeStopsAtGapAfterRightEdgeGrows) {
   EXPECT_EQ(C(), (IntMap{{7, 12}}));
 
   NonOverlappingIntervals<int> other;
-  other.add_interval(14, 16);
-  other.add_interval(7, 10);
-  other.add_interval(11, 14);
-  other.add_interval(4, 8); // grows to [4,10), must not merge [11,14)
+  other.add_interval({14, 16});
+  other.add_interval({7, 10});
+  other.add_interval({11, 14});
+  other.add_interval({4, 8}); // grows to [4,10), must not merge [11,14)
   EXPECT_EQ(other.get_container(), (IntMap{{4, 10}, {11, 16}}));
-  other.add_interval(10, 11); // closes the gap
+  other.add_interval({10, 11}); // closes the gap
   EXPECT_EQ(other.get_container(), (IntMap{{4, 16}}));
 }
 
@@ -224,11 +228,11 @@ TEST_F(NonOverlappingIntervalsTest, AddingUncoveredPartsCoversRange) {
 
 TEST(NonOverlappingIntervalsDouble, WorksWithFloatingPoint) {
   NonOverlappingIntervals<double> iv;
-  iv.add_interval(0.5, 1.5);
-  iv.add_interval(1.25, 2.75);
+  iv.add_interval({0.5, 1.5});
+  iv.add_interval({1.25, 2.75});
   EXPECT_EQ(iv.get_container(), (std::map<double, double>{{0.5, 2.75}}));
 
-  const auto gaps = ToPairs(iv.uncovered_intervals(0.0, 3.0));
+  const auto gaps = ToPairs(iv.uncovered_intervals({0.0, 3.0}));
   ASSERT_EQ(gaps.size(), 2u);
   EXPECT_DOUBLE_EQ(gaps[0].first, 0.0);
   EXPECT_DOUBLE_EQ(gaps[0].second, 0.5);
@@ -251,7 +255,9 @@ TEST(NonOverlappingIntervalsRandom, MatchesBruteForceModel) {
 
     for (int op = 0; op < 25; ++op) {
       int a = pos(rng), b = pos(rng);
-      iv.add_interval(a, b);
+      if (a > b) std::swap(a, b);
+      if (a == b) continue;
+      iv.add_interval({a, b});
       for (int x = a; x < b; ++x)
         covered[x] = true;
 
@@ -286,7 +292,7 @@ TEST(NonOverlappingIntervalsRandom, MatchesBruteForceModel) {
           ++x;
         expected_gaps.emplace_back(s, x);
       }
-      ASSERT_EQ(ToPairs(iv.uncovered_intervals(qs, qe)), expected_gaps)
+      ASSERT_EQ(ToPairs(iv.uncovered_intervals({qs, qe})), expected_gaps)
           << "query [" << qs << ", " << qe << ")";
     }
   }
