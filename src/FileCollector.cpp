@@ -53,8 +53,8 @@ void FileCollector::OnNewChunk(uint32_t fileId, size_t pos,
   for (const auto &interval : uncovered_intervals) {
     auto input_begin =
         chunk.begin() + static_cast<std::ptrdiff_t>(interval.first - pos);
-    auto input_end =
-        file->begin() + static_cast<std::ptrdiff_t>(interval.second - pos);
+    auto input_end = input_begin + static_cast<std::ptrdiff_t>(interval.second -
+                                                               interval.first);
     auto output_begin =
         file->begin() + static_cast<std::ptrdiff_t>(interval.first);
 
@@ -64,50 +64,50 @@ void FileCollector::OnNewChunk(uint32_t fileId, size_t pos,
   }
 }
 
-bool FileCollector::is_filled(uint32_t fileId) {
-  std::unique_lock<std::mutex> lock_collector(filesMutex_);
-  auto it = files_.find(fileId);
-  if (it == files_.end()) { // if file not exists
-    throw Exception(ErrorCode::FileNotExist,
-                    std::format("File {} not exists", fileId));
-  }
-
-  auto &mutex = it->second->mtx_;
-  auto &intervals = it->second->intervals_;
-  auto &file = it->second->file_;
-  std::lock_guard<std::mutex> lock_file(mutex);
-  lock_collector.unlock();
-
-  if (intervals.size() == 1) {
-    // if exists only one interval, diaposone of fileSize
-    auto start = intervals.get_container().begin()->first;
-    auto end = intervals.get_container().begin()->second;
-    return (end - start) == file->size();
-  }
-  return false;
-}
+// bool FileCollector::is_filled(uint32_t fileId) {
+// std::unique_lock<std::mutex> lock_collector(filesMutex_);
+// auto it = files_.find(fileId);
+// if (it == files_.end()) { // if file not exists
+// throw Exception(ErrorCode::FileNotExist,
+// std::format("File {} not exists", fileId));
+//}
+// auto &mutex = it->second->mtx_;
+// auto &intervals = it->second->intervals_;
+// auto &file = it->second->file_;
+// std::lock_guard<std::mutex> lock_file(mutex);
+// lock_collector.unlock();
+// if (intervals.get_container().empty()) {
+// return false;
+//}
+//
+// auto interval_it = intervals.get_container().begin();
+// if (interval_it->first == 0 && interval_it->second == file->size()) {
+// return true;
+//}
+//
+// return false;
+//}
 
 File FileCollector::GetFile(uint32_t fileId) {
   // если файл уже заполненный то возвращаем Файл
   // если нет - ошибка
-  if (is_filled(fileId)) {
-    std::lock_guard<std::mutex> lock_collector(filesMutex_);
-    auto it = files_.find(fileId);
-    return it->second->file_;
+  std::lock_guard<std::mutex> lock_collector(filesMutex_);
+  auto it = files_.find(fileId);
+  if (it == files_.end()) {
+    throw Exception(ErrorCode::FileNotExist,
+                    std::format("File {} not exist", fileId));
   }
-  throw Exception(
-      ErrorCode::FileNotFilled,
-      std::format("File {} not filled \n Try GetCollectingFile(size_t fileId) "
-                  "to get view on unfilled file",
-                  fileId));
+  return it->second->file_;
 }
 
 CollectingFile FileCollector::GetCollectingFile(uint32_t fileId) {
   std::lock_guard<std::mutex> lock_collector(filesMutex_);
   auto it = files_.find(fileId);
-  const auto &file = it->second->file_;
-  const auto &intervals = it->second->intervals_;
-  return std::make_pair(file, intervals);
+  if (it == files_.end()) {
+    throw Exception(ErrorCode::FileNotExist,
+                    std::format("File {} not exist", fileId));
+  }
+  return CollectingFile(it->second->file_, it->second->intervals_);
 }
 
 // Метод получения собранного файла.

@@ -30,12 +30,20 @@ endif()
 
 enable_testing()
 
-add_executable(non_overlapping_intervals_test test/NonOverlappingIntervals.cpp)
+add_executable(non_overlapping_intervals_test test/NonOverlappingIntervalsTest.cpp)
 target_link_libraries(non_overlapping_intervals_test PRIVATE
   file_collector
   GTest::gtest_main
 )
 target_compile_definitions(non_overlapping_intervals_test PRIVATE UNIT_TEST)
 
+add_executable(file_collector_test test/FileCollectorTest.cpp)
+target_link_libraries(file_collector_test PRIVATE
+  file_collector
+  GTest::gtest_main
+)
+target_compile_definitions(file_collector_test PRIVATE UNIT_TEST)
+
 include(GoogleTest)
 gtest_discover_tests(non_overlapping_intervals_test)
+gtest_discover_tests(file_collector_test)

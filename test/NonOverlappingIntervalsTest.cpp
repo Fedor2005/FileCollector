@@ -1,4 +1,3 @@
-// Build with -DUNIT_TEST so that get_container() is available.
 #include "../include/NonOverlappingIntervals.hpp"
 
 #include <gtest/gtest.h>
@@ -14,8 +13,6 @@ using IntMap = std::map<int, int>;
 using Pairs = std::vector<std::pair<int, int>>;
 using fc::Interval;
 using fc::NonOverlappingIntervals;
-
-
 
 // The only place that knows how Interval<T> is laid out.
 // If your Interval has named fields (e.g. .start/.end), change it here.
@@ -255,8 +252,10 @@ TEST(NonOverlappingIntervalsRandom, MatchesBruteForceModel) {
 
     for (int op = 0; op < 25; ++op) {
       int a = pos(rng), b = pos(rng);
-      if (a > b) std::swap(a, b);
-      if (a == b) continue;
+      if (a > b)
+        std::swap(a, b);
+      if (a == b)
+        continue;
       iv.add_interval({a, b});
       for (int x = a; x < b; ++x)
         covered[x] = true;
