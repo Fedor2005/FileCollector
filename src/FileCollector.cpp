@@ -17,50 +17,54 @@ FileCollector::FileState::FileState(size_t fileSize)
 void FileCollector::CollectFile(uint32_t fileId, size_t fileSize) {
   std::lock_guard<std::mutex> lock(filesMutex_);
   auto it = files_.find(fileId);
-  if (it != files_.end()) { // if the file already exists
+  if (it != files_.end()) {
     auto real_size = it->second->file_->size();
-    if (real_size != fileSize) { // check fileSize
-      // it isn't the same file
+    if (real_size != fileSize) {
       throw Exception(ErrorCode::FileIdAlreadyUse,
                       std::format("File {} with size {} already exists", fileId,
                                   real_size));
     }
+    return; // тот же файл — ничего не делаем
   }
-  files_[fileId] = std::make_shared<FileState>(fileSize);
+  files_.emplace(fileId, std::make_shared<FileState>(fileSize));
 }
+
 void FileCollector::OnNewChunk(uint32_t fileId, size_t pos,
                                std::vector<uint8_t> &&chunk) {
-  // check start_chunk, end_chunk in intervals
-  // записать, где нет пересечений
-  std::unique_lock<std::mutex> lock_collector(filesMutex_);
-  auto it = files_.find(fileId);
-  if (it == files_.end()) {
-    throw Exception(ErrorCode::FileNotExist,
-                    std::format("File {} not exist", fileId));
+  std::shared_ptr<FileState> state;
+  {
+    std::lock_guard<std::mutex> lock_collector(filesMutex_);
+    auto it = files_.find(fileId);
+    if (it == files_.end()) {
+      throw Exception(ErrorCode::FileNotExist,
+                      std::format("File {} not exist", fileId));
+    }
+    state = it->second; // держим FileState живым
   }
 
-  auto &mutex = it->second->mtx_;
-  auto &intervals = it->second->intervals_;
-  auto &file = it->second->file_;
+  const size_t fileSize = state->file_->size(); // размер не меняется
+  // запись без переполнения: pos + chunk.size() <= fileSize
+  if (pos > fileSize || chunk.size() > fileSize - pos) {
+    throw Exception(ErrorCode::ChunkOutOfRange,
+                    std::format("Chunk [{}, {}) is out of file {} size {}", pos,
+                                pos + chunk.size(), fileId, fileSize));
+  }
+  if (chunk.empty()) {
+    return;
+  }
 
-  std::lock_guard<std::mutex> lock_file(mutex);
-  lock_collector.unlock();
-
-  auto uncovered_intervals =
-      intervals.uncovered_intervals(std::make_pair(pos, pos + chunk.size()));
-
-  // file write + add each interval
-  for (const auto &interval : uncovered_intervals) {
-    auto input_begin =
+  std::lock_guard<std::mutex> lock_file(state->mtx_);
+  auto uncovered =
+      state->intervals_.uncovered_intervals({pos, pos + chunk.size()});
+  for (const auto &interval : uncovered) {
+    auto in_begin =
         chunk.begin() + static_cast<std::ptrdiff_t>(interval.first - pos);
-    auto input_end = input_begin + static_cast<std::ptrdiff_t>(interval.second -
-                                                               interval.first);
-    auto output_begin =
-        file->begin() + static_cast<std::ptrdiff_t>(interval.first);
-
-    std::copy(input_begin, input_end, output_begin);
-
-    intervals.add_interval(interval);
+    auto in_end = in_begin +
+                  static_cast<std::ptrdiff_t>(interval.second - interval.first);
+    std::copy(in_begin, in_end,
+              state->file_->begin() +
+                  static_cast<std::ptrdiff_t>(interval.first));
+    state->intervals_.add_interval(interval);
   }
 }
 

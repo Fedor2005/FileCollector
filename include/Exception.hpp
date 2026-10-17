@@ -5,7 +5,15 @@
 
 namespace fc {
 
-enum class ErrorCode { OK = 0, FileNotExist, FileNotFilled, FileIdAlreadyUse, IncorrectIntervalBoundaries };
+enum class ErrorCode {
+  OK = 0,
+  FileNotExist,
+  FileNotFilled,
+  FileIdAlreadyUse,
+  IncorrectIntervalBoundaries,
+  ChunkOutOfRange
+};
+
 class Exception : public std::runtime_error {
   ErrorCode code_;
 
