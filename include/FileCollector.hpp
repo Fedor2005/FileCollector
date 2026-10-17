@@ -28,8 +28,6 @@ public:
 
   //
 
-  // bool is_filled(uint32_t fileId);
-
 private:
   class FileState {
   public:

@@ -68,30 +68,6 @@ void FileCollector::OnNewChunk(uint32_t fileId, size_t pos,
   }
 }
 
-// bool FileCollector::is_filled(uint32_t fileId) {
-// std::unique_lock<std::mutex> lock_collector(filesMutex_);
-// auto it = files_.find(fileId);
-// if (it == files_.end()) { // if file not exists
-// throw Exception(ErrorCode::FileNotExist,
-// std::format("File {} not exists", fileId));
-//}
-// auto &mutex = it->second->mtx_;
-// auto &intervals = it->second->intervals_;
-// auto &file = it->second->file_;
-// std::lock_guard<std::mutex> lock_file(mutex);
-// lock_collector.unlock();
-// if (intervals.get_container().empty()) {
-// return false;
-//}
-//
-// auto interval_it = intervals.get_container().begin();
-// if (interval_it->first == 0 && interval_it->second == file->size()) {
-// return true;
-//}
-//
-// return false;
-//}
-
 File FileCollector::GetFile(uint32_t fileId) {
   // если файл уже заполненный то возвращаем Файл
   // если нет - ошибка

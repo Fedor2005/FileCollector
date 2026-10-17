@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 project(FileCollector CXX)
 
+option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
+
+if(ENABLE_COVERAGE)
+    message(STATUS "Code coverage enabled")
+    add_compile_options(--coverage)
+    add_link_options(--coverage)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -47,3 +55,14 @@ target_compile_definitions(file_collector_test PRIVATE UNIT_TEST)
 include(GoogleTest)
 gtest_discover_tests(non_overlapping_intervals_test)
 gtest_discover_tests(file_collector_test)
+
+if(ENABLE_COVERAGE)
+    add_custom_target(coverage
+        COMMAND ${CMAKE_CTEST_COMMAND}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/coverage
+        COMMAND gcovr -r ${CMAKE_SOURCE_DIR} --html-details -o ${CMAKE_BINARY_DIR}/coverage/index.html
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Running tests and generating HTML coverage report..."
+    )
+    add_dependencies(coverage non_overlapping_intervals_test file_collector_test)
+endif()
