@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
+#include <latch>
 #include <random>
 #include <thread>
 #include <utility>
@@ -437,6 +439,217 @@ TEST(FileCollectorMT, WritersWhileOtherFilesRegistered) {
 
   ASSERT_TRUE(IsFilled(c, 1));
   EXPECT_EQ(*c.GetFile(1), data);
+}
+
+// ---------- more multithreaded ----------
+
+// Starts n threads that all begin fn(i) at the same moment.
+void RunTogether(int n, const std::function<void(int)> &fn) {
+  std::latch start(n);
+  std::vector<std::thread> threads;
+  threads.reserve(n);
+  for (int i = 0; i < n; ++i)
+    threads.emplace_back([&, i] {
+      start.arrive_and_wait();
+      fn(i);
+    });
+  for (auto &th : threads)
+    th.join();
+}
+
+constexpr int kRepeats = 50; // races are rare, repeat small scenarios
+
+// All threads register the same file with the same size, then write
+// their own part. No one may throw, no one may wipe other's data.
+TEST(FileCollectorMT, CollectFileSameIdSameSizeRace) {
+  constexpr int kThreads = 8;
+  constexpr size_t kPart = 128;
+  auto data = MakeData(kThreads * kPart);
+
+  for (int rep = 0; rep < kRepeats; ++rep) {
+    FileCollector c;
+    std::atomic<int> errors{0};
+    RunTogether(kThreads, [&](int i) {
+      try {
+        c.CollectFile(1, data.size());
+        c.OnNewChunk(1, i * kPart, Slice(data, i * kPart, kPart));
+      } catch (...) {
+        ++errors;
+      }
+    });
+    ASSERT_EQ(errors.load(), 0) << "rep " << rep;
+    ASSERT_TRUE(IsFilled(c, 1)) << "rep " << rep;
+    ASSERT_EQ(*c.GetFile(1), data) << "rep " << rep;
+  }
+}
+
+// Threads register the same id with different sizes:
+// exactly one wins, the rest get fc::Exception.
+TEST(FileCollectorMT, CollectFileSameIdDifferentSizeRace) {
+  constexpr int kThreads = 8;
+  for (int rep = 0; rep < kRepeats; ++rep) {
+    FileCollector c;
+    std::atomic<int> ok{0}, failed{0};
+    std::atomic<size_t> winnerSize{0};
+    RunTogether(kThreads, [&](int i) {
+      size_t size = 100 + i;
+      try {
+        c.CollectFile(1, size);
+        ++ok;
+        winnerSize = size;
+      } catch (const fc::Exception &) {
+        ++failed;
+      }
+    });
+    ASSERT_EQ(ok.load(), 1) << "rep " << rep;
+    ASSERT_EQ(failed.load(), kThreads - 1) << "rep " << rep;
+    ASSERT_EQ(c.GetFile(1)->size(), winnerSize.load()) << "rep " << rep;
+  }
+}
+
+// Every byte written by its own thread: maximum contention on one mutex
+// and on interval merging.
+TEST(FileCollectorMT, SingleByteChunksContention) {
+  constexpr int kThreads = 8;
+  constexpr size_t kSize = 4096;
+  FileCollector c;
+  auto data = MakeData(kSize);
+  c.CollectFile(1, kSize);
+
+  RunTogether(kThreads, [&](int t) {
+    for (size_t pos = t; pos < kSize; pos += kThreads)
+      c.OnNewChunk(1, pos, {data[pos]});
+  });
+
+  EXPECT_EQ(Intervals(c, 1), (std::vector<Interval>{{0, kSize}}));
+  EXPECT_EQ(*c.GetFile(1), data);
+}
+
+// Each thread independently sends random overlapping chunks that together
+// cover the whole file; all threads overlap with each other everywhere.
+TEST(FileCollectorMT, EveryThreadSendsWholeFileRandomly) {
+  constexpr int kThreads = 8;
+  FileCollector c;
+  auto data = MakeData(100000);
+  c.CollectFile(1, data.size());
+
+  RunTogether(kThreads, [&](int t) {
+    std::mt19937 rng(1000 + t);
+    std::uniform_int_distribution<size_t> lenDist(1, 2000);
+    std::vector<Chunk> chunks;
+    for (size_t pos = 0; pos < data.size();) {
+      size_t len = std::min(lenDist(rng), data.size() - pos);
+      // start a bit earlier to create overlaps inside one thread too
+      size_t start = pos >= len / 2 ? pos - len / 2 : 0;
+      size_t end = pos + len;
+      chunks.push_back({start, Slice(data, start, end - start)});
+      pos = end;
+    }
+    std::shuffle(chunks.begin(), chunks.end(), rng);
+    for (auto &ch : chunks)
+      c.OnNewChunk(1, ch.pos, std::move(ch.data));
+  });
+
+  ASSERT_TRUE(IsFilled(c, 1));
+  EXPECT_EQ(*c.GetFile(1), data);
+}
+
+// Invalid calls (unknown id, out of range) from some threads must throw
+// and must not corrupt the file being written by other threads.
+TEST(FileCollectorMT, ErrorsDoNotCorruptConcurrentWrites) {
+  constexpr int kWriters = 4;
+  constexpr int kBadThreads = 4;
+  constexpr int kBadCallsPerThread = 1000;
+  FileCollector c;
+  auto data = MakeData(64 * 1024);
+  c.CollectFile(1, data.size());
+  auto chunks = MakeChunks(data, 700, 500);
+
+  std::atomic<size_t> next{0};
+  std::atomic<int> thrown{0};
+  RunTogether(kWriters + kBadThreads, [&](int t) {
+    if (t < kWriters) {
+      for (size_t i; (i = next.fetch_add(1)) < chunks.size();)
+        c.OnNewChunk(1, chunks[i].pos, std::move(chunks[i].data));
+      return;
+    }
+    for (int k = 0; k < kBadCallsPerThread; ++k) {
+      try {
+        if (k % 3 == 0)
+          c.OnNewChunk(777, 0, MakeData(4)); // unknown id
+        else if (k % 3 == 1)
+          c.OnNewChunk(1, data.size() - 2, MakeData(10)); // crosses end
+        else
+          c.OnNewChunk(1, data.size() + 5, MakeData(1)); // past end
+      } catch (const fc::Exception &) {
+        ++thrown;
+      }
+    }
+  });
+
+  EXPECT_EQ(thrown.load(), kBadThreads * kBadCallsPerThread);
+  ASSERT_TRUE(IsFilled(c, 1));
+  EXPECT_EQ(*c.GetFile(1), data);
+}
+
+// Readers take the shared_ptr while writers work. Only the pointer and the
+// (immutable) size are touched, contents are compared after join.
+TEST(FileCollectorMT, GetFilePointerWhileWriting) {
+  constexpr int kWriters = 4;
+  constexpr int kReaders = 4;
+  FileCollector c;
+  auto data = MakeData(64 * 1024);
+  c.CollectFile(1, data.size());
+  auto chunks = MakeChunks(data, 1024, 1024);
+  std::mt19937 rng(5);
+  std::shuffle(chunks.begin(), chunks.end(), rng);
+
+  std::atomic<size_t> next{0};
+  std::atomic<bool> writersDone{false};
+  std::atomic<int> writersLeft{kWriters};
+  std::atomic<int> badPtr{0};
+  RunTogether(kWriters + kReaders, [&](int t) {
+    if (t < kWriters) {
+      for (size_t i; (i = next.fetch_add(1)) < chunks.size();)
+        c.OnNewChunk(1, chunks[i].pos, std::move(chunks[i].data));
+      if (--writersLeft == 0)
+        writersDone = true;
+      return;
+    }
+    while (!writersDone) {
+      auto f = c.GetFile(1);
+      if (!f || f->size() != data.size())
+        ++badPtr;
+    }
+  });
+
+  EXPECT_EQ(badPtr.load(), 0);
+  ASSERT_TRUE(IsFilled(c, 1));
+  EXPECT_EQ(*c.GetFile(1), data);
+}
+
+// Many files registered and written concurrently, each by several threads.
+TEST(FileCollectorMT, RegisterAndWriteManyFilesTogether) {
+  constexpr uint32_t kFiles = 64;
+  constexpr int kThreadsPerFile = 3;
+  FileCollector c;
+  std::vector<std::vector<uint8_t>> files;
+  for (uint32_t id = 0; id < kFiles; ++id)
+    files.push_back(MakeData(3000 + id * 17, static_cast<uint8_t>(id)));
+
+  RunTogether(kFiles * kThreadsPerFile, [&](int t) {
+    uint32_t id = static_cast<uint32_t>(t) / kThreadsPerFile;
+    int part = t % kThreadsPerFile;
+    c.CollectFile(id, files[id].size()); // same id from several threads
+    auto chunks = MakeChunks(files[id], 256, 200);
+    for (size_t i = part; i < chunks.size(); i += kThreadsPerFile)
+      c.OnNewChunk(id, chunks[i].pos, std::move(chunks[i].data));
+  });
+
+  for (uint32_t id = 0; id < kFiles; ++id) {
+    ASSERT_TRUE(IsFilled(c, id)) << "file " << id;
+    EXPECT_EQ(*c.GetFile(id), files[id]) << "file " << id;
+  }
 }
 
 } // namespace

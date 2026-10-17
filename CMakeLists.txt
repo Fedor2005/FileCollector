@@ -9,6 +9,19 @@ if(ENABLE_COVERAGE)
     add_link_options(--coverage)
 endif()
 
+option(USE_TSAN "Enable Thread Sanitizer" OFF)
+
+if(USE_TSAN)
+    message(STATUS "Thread Sanitizer enabled")
+
+    if(ENABLE_COVERAGE)
+        message(WARNING "Both USE_TSAN and ENABLE_COVERAGE are enabled. This is generally not recommended and may lead to conflicts or extreme performance degradation.")
+    endif()
+
+    add_compile_options(-fsanitize=thread -g)
+    add_link_options(-fsanitize=thread)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
