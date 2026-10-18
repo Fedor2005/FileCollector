@@ -5,8 +5,12 @@ option(ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 
 if(ENABLE_COVERAGE)
     message(STATUS "Code coverage enabled")
-    add_compile_options(--coverage)
-    add_link_options(--coverage)
+    if(MSVC)
+        message(WARNING "Code coverage via --coverage is not supported on MSVC. Please use specialized tools like OpenCppCoverage.")
+    else()
+        add_compile_options(--coverage)
+        add_link_options(--coverage)
+    endif()
 endif()
 
 option(USE_TSAN "Enable Thread Sanitizer" OFF)
@@ -18,15 +22,23 @@ if(USE_TSAN)
         message(WARNING "Both USE_TSAN and ENABLE_COVERAGE are enabled. This is generally not recommended and may lead to conflicts or extreme performance degradation.")
     endif()
 
-    add_compile_options(-fsanitize=thread -g)
-    add_link_options(-fsanitize=thread)
+    if(MSVC)
+        message(FATAL_ERROR "Thread Sanitizer (TSAN) is not supported on MSVC through this CMake configuration.")
+    else()
+        add_compile_options(-fsanitize=thread -g)
+        add_link_options(-fsanitize=thread)
+    endif()
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Common compile options
-add_compile_options(-Wall -Wextra -Wpedantic)
+if(MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
 # Library for the core logic
 add_library(file_collector
@@ -56,14 +68,12 @@ target_link_libraries(non_overlapping_intervals_test PRIVATE
   file_collector
   GTest::gtest_main
 )
-target_compile_definitions(non_overlapping_intervals_test PRIVATE UNIT_TEST)
 
 add_executable(file_collector_test test/FileCollectorTest.cpp)
 target_link_libraries(file_collector_test PRIVATE
   file_collector
   GTest::gtest_main
 )
-target_compile_definitions(file_collector_test PRIVATE UNIT_TEST)
 
 include(GoogleTest)
 gtest_discover_tests(non_overlapping_intervals_test)

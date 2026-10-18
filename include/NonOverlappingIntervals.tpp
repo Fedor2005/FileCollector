@@ -44,9 +44,8 @@ void NonOverlappingIntervals<T>::add_interval(const Interval<T> &interval) {
   auto start = interval.first;
   auto end = interval.second;
   if (!(start < end)) {
-    throw Exception(
-        ErrorCode::IncorrectIntervalBoundaries,
-        std::format("interval invalid with boundaries {}; {}", start, end));
+    throw Exception(ErrorCode::IncorrectIntervalBoundaries,
+                    std::format("interval invalid with boundaries"));
   }
 
   T new_start = start;
