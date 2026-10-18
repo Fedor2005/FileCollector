@@ -16,16 +16,28 @@ cc_library(
         "include/NonOverlappingIntervals.tpp",
     ],
     strip_include_prefix = "include",
-    copts = [
-        "-Wall",
-        "-Wextra",
-        "-Wpedantic",
-    ],
+    copts = select({
+        "@platforms//os:windows": [
+            "/W4",
+            "/std:c++20",
+        ],
+        "//conditions:default": [
+            "-Wall",
+            "-Wextra",
+            "-Wpedantic",
+        ],
+    }),
 )
 
 cc_test(
     name = "non_overlapping_intervals_test",
     srcs = ["test/NonOverlappingIntervalsTest.cpp"],
+    copts = select({
+        "@platforms//os:windows": [
+            "/std:c++20",
+        ],
+        "//conditions:default": [],
+    }),
     deps = [
         ":file_collector",
         "@googletest//:gtest_main",
@@ -35,6 +47,12 @@ cc_test(
 cc_test(
     name = "file_collector_test",
     srcs = ["test/FileCollectorTest.cpp"],
+    copts = select({
+        "@platforms//os:windows": [
+            "/std:c++20",
+        ],
+        "//conditions:default": [],
+    }),
     deps = [
         ":file_collector",
         "@googletest//:gtest_main",
