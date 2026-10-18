@@ -15,7 +15,6 @@ using fc::Interval;
 using fc::NonOverlappingIntervals;
 
 // The only place that knows how Interval<T> is laid out.
-// If your Interval has named fields (e.g. .start/.end), change it here.
 template <typename T>
 std::vector<std::pair<T, T>> ToPairs(const std::vector<Interval<T>> &v) {
   std::vector<std::pair<T, T>> out;
