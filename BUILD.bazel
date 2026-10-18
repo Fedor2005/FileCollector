@@ -1,0 +1,44 @@
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+
+cc_library(
+    name = "file_collector",
+    srcs = [
+        "src/FileCollector.cpp",
+        "src/Exception.cpp",
+    ],
+    hdrs = [
+        "include/FileCollector.hpp",
+        "include/Exception.hpp",
+        "include/NonOverlappingIntervals.hpp",
+    ],
+    textual_hdrs = [
+        "include/NonOverlappingIntervals.tpp",
+    ],
+    strip_include_prefix = "include",
+    copts = [
+        "-Wall",
+        "-Wextra",
+        "-Wpedantic",
+    ],
+)
+
+cc_test(
+    name = "non_overlapping_intervals_test",
+    srcs = ["test/NonOverlappingIntervalsTest.cpp"],
+    copts = ["-DUNIT_TEST"],
+    deps = [
+        ":file_collector",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "file_collector_test",
+    srcs = ["test/FileCollectorTest.cpp"],
+    copts = ["-DUNIT_TEST"],
+    deps = [
+        ":file_collector",
+        "@googletest//:gtest_main",
+    ],
+)

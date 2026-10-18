@@ -17,13 +17,13 @@ class FileCollector {
 public:
   void CollectFile(uint32_t fileId, size_t fileSize);
   void OnNewChunk(uint32_t fileId, size_t pos, std::vector<uint8_t> &&chunk);
-  // pos - позиция в файле
+  // pos - position in file
 
-  // Возвращает файл. Если файл не заполенен, ошибка.
+  // Returns the file. If the file is not filled, error.
   File GetFile(uint32_t FileId);
 
-  // немедленный возврат ссылки на констатные файл + интервалы, на которых он
-  // заполнен
+  // immediate return of reference to constant file + intervals where it is
+  // filled
   CollectingFile GetCollectingFile(uint32_t fileId);
 
   //

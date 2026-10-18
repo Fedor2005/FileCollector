@@ -24,7 +24,7 @@ void FileCollector::CollectFile(uint32_t fileId, size_t fileSize) {
                       std::format("File {} with size {} already exists", fileId,
                                   real_size));
     }
-    return; // тот же файл — ничего не делаем
+    return; // same file - do nothing
   }
   files_.emplace(fileId, std::make_shared<FileState>(fileSize));
 }
@@ -39,11 +39,11 @@ void FileCollector::OnNewChunk(uint32_t fileId, size_t pos,
       throw Exception(ErrorCode::FileNotExist,
                       std::format("File {} not exist", fileId));
     }
-    state = it->second; // держим FileState живым
+    state = it->second; // keep FileState alive
   }
 
-  const size_t fileSize = state->file_->size(); // размер не меняется
-  // запись без переполнения: pos + chunk.size() <= fileSize
+  const size_t fileSize = state->file_->size(); // size does not change
+  // write without overflow: pos + chunk.size() <= fileSize
   if (pos > fileSize || chunk.size() > fileSize - pos) {
     throw Exception(ErrorCode::ChunkOutOfRange,
                     std::format("Chunk [{}, {}) is out of file {} size {}", pos,
@@ -69,8 +69,8 @@ void FileCollector::OnNewChunk(uint32_t fileId, size_t pos,
 }
 
 File FileCollector::GetFile(uint32_t fileId) {
-  // если файл уже заполненный то возвращаем Файл
-  // если нет - ошибка
+  // if the file is already filled, return the File
+  // if not - error
   std::lock_guard<std::mutex> lock_collector(filesMutex_);
   auto it = files_.find(fileId);
   if (it == files_.end()) {
@@ -89,7 +89,3 @@ CollectingFile FileCollector::GetCollectingFile(uint32_t fileId) {
   }
   return CollectingFile(it->second->file_, it->second->intervals_);
 }
-
-// Метод получения собранного файла.
-// Требуется предложить и реализовать оптимальный интерфейс.
-// std::vector<uint8_t> GetFile(uint32_t fileId); // Как передавать данные?

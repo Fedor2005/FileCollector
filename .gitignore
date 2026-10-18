@@ -1,4 +1,9 @@
 .clangd
+bazel-bin
+bazel-out
+bazel-testlogs
+bazel-FileCollector
+MODULE.bazel.lock
 
 #Reference from https://github.com/github/gitignore/C++.gitignore
 

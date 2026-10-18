@@ -6,6 +6,6 @@
 using namespace fc;
 
 Exception::Exception(ErrorCode code, const std::string &msg)
-    : code_(code), std::runtime_error(msg) {}
+    : std::runtime_error(msg), code_(code) {}
 
 ErrorCode Exception::code() const noexcept { return code_; }
