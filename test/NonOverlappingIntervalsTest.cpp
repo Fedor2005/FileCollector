@@ -14,7 +14,6 @@ using Pairs = std::vector<std::pair<int, int>>;
 using fc::Interval;
 using fc::NonOverlappingIntervals;
 
-// The only place that knows how Interval<T> is laid out.
 template <typename T>
 std::vector<std::pair<T, T>> ToPairs(const std::vector<Interval<T>> &v) {
   std::vector<std::pair<T, T>> out;
@@ -65,7 +64,7 @@ TEST_F(NonOverlappingIntervalsTest, AddToEmpty) {
   EXPECT_EQ(C(), (IntMap{{2, 5}}));
 }
 
-TEST_F(NonOverlappingIntervalsTest, EmptyAndInvertedIntervalsAreIgnored) {
+TEST_F(NonOverlappingIntervalsTest, EmptyAndInvertedIntervalsThrow) {
   EXPECT_THROW(iv.add_interval({5, 5}), fc::Exception);
   EXPECT_THROW(iv.add_interval({7, 3}), fc::Exception);
   EXPECT_TRUE(C().empty());

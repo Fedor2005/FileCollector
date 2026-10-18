@@ -54,6 +54,7 @@ target_include_directories(file_collector PUBLIC
 find_package(GTest QUIET)
 if(NOT GTest_FOUND)
   include(FetchContent)
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_Declare(
     googletest
     URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.zip
