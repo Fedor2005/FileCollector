@@ -1,4 +1,4 @@
-#include "../include/Exception.hpp"
+#include "Exception.hpp"
 
 #include <stdexcept>
 #include <string>

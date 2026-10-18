@@ -1,46 +1,78 @@
 #pragma once
 
 #include "NonOverlappingIntervals.hpp"
+
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
 namespace fc {
-using File = std::shared_ptr<std::vector<uint8_t>>;
-using CollectingFile = std::pair<std::shared_ptr<const std::vector<uint8_t>>,
-                                 const NonOverlappingIntervals<size_t> &>;
+
+// A fully collected file. Once collection is complete the buffer never
+// changes, so it can be shared with any number of readers without copying.
+using FileData = std::shared_ptr<const std::vector<uint8_t>>;
 
 class FileCollector {
 public:
+  // Registers a file. Calling again with the same size is a no-op;
+  // a different size throws ErrorCode::FileIdAlreadyUse.
   void CollectFile(uint32_t fileId, size_t fileSize);
+
+  // Adds the chunk [pos, pos + chunk.size()). Bytes that are already written
+  // are not overwritten; only uncovered ranges are copied.
   void OnNewChunk(uint32_t fileId, size_t pos, std::vector<uint8_t> &&chunk);
-  // pos - position in file
 
-  // Returns the file. If the file is not filled, error.
-  File GetFile(uint32_t FileId);
+  // ---------- reading (all methods are thread-safe) ----------
 
-  // immediate return of reference to constant file + intervals where it is
-  // filled
-  CollectingFile GetCollectingFile(uint32_t fileId);
+  // true if every byte of the file has been received.
+  bool IsComplete(uint32_t fileId) const;
 
-  //
+  // File size passed to CollectFile.
+  size_t GetFileSize(uint32_t fileId) const;
+
+  // The whole file, without copying. Throws ErrorCode::FileNotFilled if the
+  // file is not complete yet: a partially collected buffer is never exposed,
+  // because other threads are still writing into it.
+  FileData GetFile(uint32_t fileId) const;
+
+  // Partial read: copies into out the contiguous already-received range
+  // starting at pos (at most out.size() bytes). Returns the number of bytes
+  // copied; 0 if the byte at pos has not been received yet.
+  // pos > file size -> ErrorCode::ChunkOutOfRange.
+  size_t Read(uint32_t fileId, size_t pos, std::span<uint8_t> out) const;
+
+  // Snapshot of filled intervals [begin, end), sorted by begin.
+  std::vector<Interval<size_t>> GetFilledIntervals(uint32_t fileId) const;
 
 private:
-  class FileState {
-  public:
-    File file_; // File
-    // struct what can store vector and Mapped File
-    NonOverlappingIntervals<size_t> intervals_; // non‑overlapping merged
-    mutable std::mutex mtx_;
+  struct FileState {
+    explicit FileState(size_t fileSize);
 
-    FileState(size_t fileSize);
+    // The pointer never changes after construction; the contents are written
+    // under mtx and never change once complete == true.
+    const std::shared_ptr<std::vector<uint8_t>> data;
+    const size_t size;
+
+    NonOverlappingIntervals<size_t> intervals; // guarded by mtx
+    mutable std::mutex mtx;
+
+    // Set under mtx (release) after the last byte is written.
+    // A reader that observes true (acquire) sees the whole file.
+    std::atomic<bool> complete{false};
   };
 
+  std::shared_ptr<FileState> FindState(uint32_t fileId) const;
+
   std::unordered_map<uint32_t, std::shared_ptr<FileState>> files_;
-  mutable std::mutex filesMutex_;
+  // File lookup (the frequent operation) takes a shared lock,
+  // registering a new file takes an exclusive one.
+  mutable std::shared_mutex filesMutex_;
 };
 
 } // namespace fc

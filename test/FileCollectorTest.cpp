@@ -1,5 +1,5 @@
-#include "../include/FileCollector.hpp"
-#include "../include/Exception.hpp"
+#include "FileCollector.hpp"
+#include "Exception.hpp"
 
 #include <gtest/gtest.h>
 
@@ -11,6 +11,7 @@
 #include <latch>
 #include <random>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -53,18 +54,28 @@ std::vector<Chunk> MakeChunks(const std::vector<uint8_t> &data,
   return res;
 }
 
-// Snapshot of filled intervals. Call only when no writers are active:
-// GetCollectingFile returns a reference that is read without the file lock.
-std::vector<Interval> Intervals(FileCollector &c, uint32_t id) {
-  auto cf = c.GetCollectingFile(id);
-  const auto &cont = cf.second.get_container();
-  return {cont.begin(), cont.end()};
+// Thread-safe snapshot of filled intervals.
+std::vector<Interval> Intervals(const FileCollector &c, uint32_t id) {
+  return c.GetFilledIntervals(id);
 }
 
-bool IsFilled(FileCollector &c, uint32_t id) {
-  auto cf = c.GetCollectingFile(id);
-  auto iv = Intervals(c, id);
-  return iv.size() == 1 && iv[0].first == 0 && iv[0].second == cf.first->size();
+bool IsFilled(const FileCollector &c, uint32_t id) { return c.IsComplete(id); }
+
+// Reads [pos, pos + len) via the partial-read API; returns what was copied.
+std::vector<uint8_t> ReadRange(const FileCollector &c, uint32_t id, size_t pos,
+                               size_t len) {
+  std::vector<uint8_t> out(len);
+  out.resize(c.Read(id, pos, out));
+  return out;
+}
+
+bool HasError(const std::function<void()> &fn, fc::ErrorCode code) {
+  try {
+    fn();
+  } catch (const fc::Exception &e) {
+    return e.code() == code;
+  }
+  return false;
 }
 
 // ---------- basic scenarios ----------
@@ -85,14 +96,21 @@ TEST(FileCollector, ExampleFromTask) {
   EXPECT_EQ(*f, Bytes({'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'}));
 }
 
-TEST(FileCollector, NewFileIsZeroedAndHasNoIntervals) {
+TEST(FileCollector, NewFileHasNoDataAndNoIntervals) {
   FileCollector c;
   c.CollectFile(1, 10);
-  auto f = c.GetFile(1);
-  ASSERT_NE(f, nullptr);
-  EXPECT_EQ(*f, std::vector<uint8_t>(10, 0));
+  EXPECT_EQ(c.GetFileSize(1), 10u);
   EXPECT_TRUE(Intervals(c, 1).empty());
   EXPECT_FALSE(IsFilled(c, 1));
+  EXPECT_TRUE(ReadRange(c, 1, 0, 10).empty());
+  EXPECT_TRUE(HasError([&] { c.GetFile(1); }, fc::ErrorCode::FileNotFilled));
+}
+
+TEST(FileCollector, ZeroSizeFileIsCompleteImmediately) {
+  FileCollector c;
+  c.CollectFile(1, 0);
+  EXPECT_TRUE(IsFilled(c, 1));
+  EXPECT_TRUE(c.GetFile(1)->empty());
 }
 
 TEST(FileCollector, SingleChunkCoversWholeFile) {
@@ -140,10 +158,10 @@ TEST(FileCollector, GapsAreReportedAsSeparateIntervals) {
   c.OnNewChunk(1, 0, Slice(data, 0, 3));
 
   EXPECT_EQ(Intervals(c, 1), (std::vector<Interval>{{0, 3}, {7, 10}}));
-  auto f = c.GetFile(1);
-  EXPECT_EQ(Slice(*f, 0, 3), Slice(data, 0, 3));
-  EXPECT_EQ(Slice(*f, 7, 3), Slice(data, 7, 3));
-  EXPECT_EQ(Slice(*f, 3, 4), std::vector<uint8_t>(4, 0)); // gap untouched
+  EXPECT_FALSE(IsFilled(c, 1));
+  EXPECT_EQ(ReadRange(c, 1, 0, 3), Slice(data, 0, 3));
+  EXPECT_EQ(ReadRange(c, 1, 7, 3), Slice(data, 7, 3));
+  EXPECT_TRUE(ReadRange(c, 1, 3, 4).empty()); // gap is not readable
 }
 
 TEST(FileCollector, DuplicatesAreHarmless) {
@@ -288,7 +306,7 @@ TEST(FileCollector, CollectFileSameIdSameSizeKeepsData) {
 
   EXPECT_NO_THROW(c.CollectFile(1, 10));
   EXPECT_EQ(Intervals(c, 1), (std::vector<Interval>{{0, 5}}));
-  EXPECT_EQ(Slice(*c.GetFile(1), 0, 5), Slice(data, 0, 5));
+  EXPECT_EQ(ReadRange(c, 1, 0, 5), Slice(data, 0, 5));
 }
 
 // ---------- errors ----------
@@ -303,9 +321,68 @@ TEST(FileCollector, GetFileUnknownIdThrows) {
   EXPECT_THROW(c.GetFile(42), fc::Exception);
 }
 
-TEST(FileCollector, GetCollectingFileUnknownIdThrows) {
+TEST(FileCollector, ReadApiUnknownIdThrows) {
   FileCollector c;
-  EXPECT_THROW(c.GetCollectingFile(42), fc::Exception);
+  std::vector<uint8_t> buf(4);
+  const auto code = fc::ErrorCode::FileNotExist;
+  EXPECT_TRUE(HasError([&] { c.IsComplete(42); }, code));
+  EXPECT_TRUE(HasError([&] { c.GetFileSize(42); }, code));
+  EXPECT_TRUE(HasError([&] { c.Read(42, 0, buf); }, code));
+  EXPECT_TRUE(HasError([&] { c.GetFilledIntervals(42); }, code));
+}
+
+// ---------- partial read ----------
+
+TEST(FileCollector, ReadStopsAtEndOfFilledInterval) {
+  FileCollector c;
+  auto data = MakeData(20);
+  c.CollectFile(1, 20);
+  c.OnNewChunk(1, 2, Slice(data, 2, 6)); // [2,8)
+
+  EXPECT_EQ(ReadRange(c, 1, 2, 100), Slice(data, 2, 6)); // only what exists
+  EXPECT_EQ(ReadRange(c, 1, 5, 2), Slice(data, 5, 2));   // limited by buffer
+  EXPECT_TRUE(ReadRange(c, 1, 1, 5).empty());            // pos in gap
+  EXPECT_TRUE(ReadRange(c, 1, 8, 5).empty());            // pos right at end
+}
+
+TEST(FileCollector, ReadCompleteFileFromAnyPosition) {
+  FileCollector c;
+  auto data = MakeData(50);
+  c.CollectFile(1, 50);
+  c.OnNewChunk(1, 0, std::vector<uint8_t>(data));
+  EXPECT_EQ(ReadRange(c, 1, 0, 50), data);
+  EXPECT_EQ(ReadRange(c, 1, 45, 100), Slice(data, 45, 5));
+  EXPECT_TRUE(ReadRange(c, 1, 50, 10).empty()); // pos == size is allowed
+}
+
+TEST(FileCollector, ReadPastEndThrows) {
+  FileCollector c;
+  c.CollectFile(1, 10);
+  std::vector<uint8_t> buf(4);
+  EXPECT_TRUE(
+      HasError([&] { c.Read(1, 11, buf); }, fc::ErrorCode::ChunkOutOfRange));
+}
+
+TEST(FileCollector, GetFileReturnsSameBufferWithoutCopy) {
+  FileCollector c;
+  c.CollectFile(1, 8);
+  c.OnNewChunk(1, 0, MakeData(8));
+  auto a = c.GetFile(1);
+  auto b = c.GetFile(1);
+  EXPECT_EQ(a.get(), b.get()); // both readers share one buffer
+  static_assert(
+      std::is_same_v<decltype(a)::element_type, const std::vector<uint8_t>>,
+      "GetFile must not give write access");
+}
+
+TEST(FileCollector, ChunksAfterCompletionDoNotChangeFile) {
+  FileCollector c;
+  auto data = MakeData(8);
+  c.CollectFile(1, 8);
+  c.OnNewChunk(1, 0, std::vector<uint8_t>(data));
+  auto f = c.GetFile(1);
+  c.OnNewChunk(1, 0, std::vector<uint8_t>(8, 0xFF)); // late duplicate
+  EXPECT_EQ(*f, data);
 }
 
 TEST(FileCollector, ChunkStartingPastEndThrows) {
@@ -503,11 +580,11 @@ TEST(FileCollectorMT, CollectFileSameIdDifferentSizeRace) {
     });
     ASSERT_EQ(ok.load(), 1) << "rep " << rep;
     ASSERT_EQ(failed.load(), kThreads - 1) << "rep " << rep;
-    ASSERT_EQ(c.GetFile(1)->size(), winnerSize.load()) << "rep " << rep;
+    ASSERT_EQ(c.GetFileSize(1), winnerSize.load()) << "rep " << rep;
   }
 }
 
-// Every byte written by its own thread: maximum contention on one mutex
+// Every byte written by its own call: maximum contention on one mutex
 // and on interval merging.
 TEST(FileCollectorMT, SingleByteChunksContention) {
   constexpr int kThreads = 8;
@@ -592,40 +669,95 @@ TEST(FileCollectorMT, ErrorsDoNotCorruptConcurrentWrites) {
   EXPECT_EQ(*c.GetFile(1), data);
 }
 
-// Readers take the shared_ptr while writers work. Only the pointer and the
-// (immutable) size are touched, contents are compared after join.
-TEST(FileCollectorMT, GetFilePointerWhileWriting) {
+// Readers use the whole read API while writers are still working.
+// Everything a reader sees must already be correct data. Run under TSan
+// (-DUSE_TSAN=ON) to also prove there are no data races.
+TEST(FileCollectorMT, ReadWhileWriting) {
   constexpr int kWriters = 4;
   constexpr int kReaders = 4;
   FileCollector c;
   auto data = MakeData(64 * 1024);
   c.CollectFile(1, data.size());
-  auto chunks = MakeChunks(data, 1024, 1024);
+  auto chunks = MakeChunks(data, 1024, 700);
   std::mt19937 rng(5);
   std::shuffle(chunks.begin(), chunks.end(), rng);
 
   std::atomic<size_t> next{0};
-  std::atomic<bool> writersDone{false};
-  std::atomic<int> writersLeft{kWriters};
-  std::atomic<int> badPtr{0};
+  std::atomic<int> wrongBytes{0};
+  std::atomic<size_t> partialReads{0};
   RunTogether(kWriters + kReaders, [&](int t) {
     if (t < kWriters) {
       for (size_t i; (i = next.fetch_add(1)) < chunks.size();)
         c.OnNewChunk(1, chunks[i].pos, std::move(chunks[i].data));
-      if (--writersLeft == 0)
-        writersDone = true;
       return;
     }
-    while (!writersDone) {
-      auto f = c.GetFile(1);
-      if (!f || f->size() != data.size())
-        ++badPtr;
+    std::mt19937 r(t);
+    std::uniform_int_distribution<size_t> posDist(0, data.size() - 1);
+    std::vector<uint8_t> buf(4096);
+    while (!c.IsComplete(1)) {
+      // Partial read from a random position.
+      const size_t pos = posDist(r);
+      const size_t n = c.Read(1, pos, buf);
+      if (!std::equal(buf.begin(), buf.begin() + n, data.begin() + pos))
+        ++wrongBytes;
+      partialReads += n > 0;
+
+      // Every interval reported as filled must be readable and correct.
+      // It may have grown (merged with neighbours) since the snapshot,
+      // so Read can return more than e - s, but never less.
+      for (const auto &[s, e] : c.GetFilledIntervals(1)) {
+        const size_t got = c.Read(1, s, buf);
+        if (got < std::min(buf.size(), e - s) ||
+            !std::equal(buf.begin(), buf.begin() + got, data.begin() + s))
+          ++wrongBytes;
+      }
     }
+    // As soon as IsComplete() is true the whole file must be visible.
+    auto f = c.GetFile(1);
+    if (*f != data)
+      ++wrongBytes;
   });
 
-  EXPECT_EQ(badPtr.load(), 0);
+  EXPECT_EQ(wrongBytes.load(), 0);
+  EXPECT_GT(partialReads.load(), 0u) << "readers never overlapped writers";
   ASSERT_TRUE(IsFilled(c, 1));
   EXPECT_EQ(*c.GetFile(1), data);
+}
+
+// Consumers poll GetFile(): it either throws FileNotFilled or returns the
+// complete, correct file - never a half-written buffer.
+TEST(FileCollectorMT, GetFileNeverReturnsIncompleteFile) {
+  for (int rep = 0; rep < 20; ++rep) {
+    FileCollector c;
+    auto data = MakeData(16 * 1024, static_cast<uint8_t>(rep));
+    c.CollectFile(1, data.size());
+    auto chunks = MakeChunks(data, 256, 256);
+    std::mt19937 rng(rep);
+    std::shuffle(chunks.begin(), chunks.end(), rng);
+
+    std::atomic<size_t> next{0};
+    std::atomic<int> bad{0};
+    RunTogether(4, [&](int t) {
+      if (t < 2) {
+        for (size_t i; (i = next.fetch_add(1)) < chunks.size();)
+          c.OnNewChunk(1, chunks[i].pos, std::move(chunks[i].data));
+        return;
+      }
+      for (;;) {
+        try {
+          if (*c.GetFile(1) != data)
+            ++bad;
+          return;
+        } catch (const fc::Exception &e) {
+          if (e.code() != fc::ErrorCode::FileNotFilled) {
+            ++bad;
+            return;
+          }
+        }
+      }
+    });
+    ASSERT_EQ(bad.load(), 0) << "rep " << rep;
+  }
 }
 
 // Many files registered and written concurrently, each by several threads.
