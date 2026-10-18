@@ -1,4 +1,4 @@
-#include "../include/NonOverlappingIntervals.hpp"
+#include "NonOverlappingIntervals.hpp"
 
 #include <gtest/gtest.h>
 

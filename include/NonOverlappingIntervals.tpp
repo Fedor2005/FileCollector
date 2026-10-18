@@ -3,7 +3,7 @@
 
 #include <format>
 
-using namespace fc;
+namespace fc {
 
 template <Comparable T>
 std::vector<Interval<T>> NonOverlappingIntervals<T>::uncovered_intervals(
@@ -73,3 +73,5 @@ void NonOverlappingIntervals<T>::add_interval(const Interval<T> &interval) {
 
   container_.emplace_hint(it, new_start, new_end);
 }
+
+} // namespace fc

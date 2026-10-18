@@ -1,5 +1,5 @@
-#include "../include/FileCollector.hpp"
-#include "../include/Exception.hpp"
+#include "FileCollector.hpp"
+#include "Exception.hpp"
 
 #include <gtest/gtest.h>
 

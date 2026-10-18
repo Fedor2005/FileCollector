@@ -1,6 +1,6 @@
-#include "../include/FileCollector.hpp"
-#include "../include/Exception.hpp"
-#include "../include/NonOverlappingIntervals.hpp"
+#include "FileCollector.hpp"
+#include "Exception.hpp"
+#include "NonOverlappingIntervals.hpp"
 
 #include <cstddef>
 #include <cstdint>
