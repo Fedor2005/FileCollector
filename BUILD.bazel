@@ -26,7 +26,6 @@ cc_library(
 cc_test(
     name = "non_overlapping_intervals_test",
     srcs = ["test/NonOverlappingIntervalsTest.cpp"],
-    copts = ["-DUNIT_TEST"],
     deps = [
         ":file_collector",
         "@googletest//:gtest_main",
@@ -36,7 +35,6 @@ cc_test(
 cc_test(
     name = "file_collector_test",
     srcs = ["test/FileCollectorTest.cpp"],
-    copts = ["-DUNIT_TEST"],
     deps = [
         ":file_collector",
         "@googletest//:gtest_main",
