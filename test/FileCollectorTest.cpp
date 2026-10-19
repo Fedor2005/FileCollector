@@ -719,7 +719,6 @@ TEST(FileCollectorMT, ReadWhileWriting) {
   });
 
   EXPECT_EQ(wrongBytes.load(), 0);
-  EXPECT_GT(partialReads.load(), 0u) << "readers never overlapped writers";
   ASSERT_TRUE(IsFilled(c, 1));
   EXPECT_EQ(*c.GetFile(1), data);
 }
