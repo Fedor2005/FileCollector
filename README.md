@@ -1,6 +1,7 @@
 # File Collector
 
 Тестовое задание Intern C++ SafeBoard 2026
+
 Реализация потокобезопасного класса `FileCollector`, который собирает файлы, передаваемые чанками в произвольном порядке.
 **GitHub:** [github.com/Fedor2005/FileCollector](https://github.com/Fedor2005/FileCollector)
 
@@ -28,34 +29,7 @@
 - GoogleTest, ThreadSanitizer, gcov/gcovr
 
 
-## Сборка
-Linux:
-CMake
-```bash
-mkdir build && cd build
-cmake ..
-make
-```
-
-Bazel
-```bash
-bazel build //...
-```
-
-Windows:
-CMake
-```powershell
-mkdir build
-cd build
-cmake ..
-cmake --build .
-```
-Bazel
-```powershell
-bazel build //...
-```
-
-## Тесты
+## Сборка и тесты
 
 ### CMake
 Для CMake рекомендуется использовать отдельную директорию `build`.
@@ -240,7 +214,7 @@ FileCollector
 
 ## О себе
 
-Фёдор Михалев, я студент 4 курса НИЯУ МИФИ (Программная инженерия, ИИКС). Подаюсь в Safeboard на C++, DevOps и системный анализ, приоритет — C++.
+Студент 4 курса НИЯУ МИФИ (Программная инженерия, ИИКС). Подаюсь в Safeboard на C++, DevOps и системный анализ, приоритет — C++.
 
 На C++20 пишу библиотеку структур данных и алгоритмов: контейнеры, умные указатели, сортировки, сборка через CMake, тесты на Google Test. Реализовал внешнюю сортировку файлов до 5 ГБ и сравнил производительность своих контейнеров с эталонными (github.com/Fedor2005).
 
